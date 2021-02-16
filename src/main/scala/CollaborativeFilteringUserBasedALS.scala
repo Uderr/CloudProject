@@ -1,6 +1,6 @@
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.mllib.recommendation.{ALS, MatrixFactorizationModel, Rating}
-import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.functions.{desc, sum}
 
@@ -19,11 +19,9 @@ object CollaborativeFilteringUserBasedALS {
     .getOrCreate()
 
 
-
   //DECLARATION OF DATASETS
   val data = sc.textFile("rating.csv")
   val movies = sc.textFile("movie.csv")
-
 
 
   //----------------------------------------------------------------------------
@@ -65,6 +63,7 @@ object CollaborativeFilteringUserBasedALS {
     predictions
   }
 
+
   //----------------------------------------------------------------------------
   //SET OF FUNCTIONS USED FOR THE RECOMMENDATIONS
 
@@ -88,6 +87,7 @@ object CollaborativeFilteringUserBasedALS {
     prediction
   }
 
+
   //----------------------------------------------------------------------------
   //MEAN SQUARE ERROR OF THE MODEL
   def MSE(algoALS: MatrixFactorizationModel,predictionWithMapping: RDD[((Int, Int), (Double, Double))]): Double = {
@@ -97,24 +97,55 @@ object CollaborativeFilteringUserBasedALS {
     MSE
   }
 
-  //----------------------------------------------------------------------------
-  //COLD START
 
-  //FUNCTION USED FOR RESOLVE THE CASE OF A NEW USER
-  def topRated(): Array[Row] = {
+  //----------------------------------------------------------------------------
+  //COLD START - FUNCTIONS USED TO RESOLVE THE PROBLEM OF A NEW USER
+
+  //FUNCTION USED FOR GENERATE 20 TOP RATED FILMS
+  def topRated(): Array[String] = {
     import ss.implicits._
 
     val data = ss.read.format("csv").option("header", "true").load("DatasetWithID/rating.csv")
+    val movies = ss.read.format("csv").option("header","true").load("DatasetWithID/movie.csv")
+    val movie = movies.withColumn("movieId", $"movieId".cast("Integer"))
+
+
     val firstDataframe = data.groupBy("movieId").agg(sum("rating"))
-    val averagePerFilm = firstDataframe.withColumn("sum(rating)", $"sum(rating)" / 40144)
-    val sortedAverage = averagePerFilm.sort(desc("sum(rating)")).take(20)
-    sortedAverage.foreach(println)
-    sortedAverage
+      .withColumn("sum(rating)", $"sum(rating)" / 40144)
+    val dataframeMovieRating = movie.join(firstDataframe,movie("movieId") === firstDataframe("movieId"),"inner")
+      .sort(desc("sum(rating)"))
+
+
+    val nameWithRating = dataframeMovieRating.select("title","sum(rating)").take(20)
+
+    val nameOfRecommendedFilm = dataframeMovieRating.select("title").collect.map(_.getString(0)).take(20)
+
+    nameOfRecommendedFilm
+
   }
 
+  //ASK A USER FEEDBACK FOR ALL TOP RATED FILMS AND ADD THE NEW RATINGS TO THE DATASET
+  def askUserInput(topRated: Array[String]): Array[Int] = {
+    val feedback = Array[Int](30)
+    for(i <- 5 to 10) {
 
+      feedback(i) = i
+    }
+    println(feedback)
+    feedback
+  }
 
+  //ASK A USER FEEDBACK FOR 10 RANDOM MOVIES AND ADD THE NEW RATINGS TO THE DATASET
+  def addFilmForNewUser(): Unit = {
 
+  }
+
+  //MAKE A PREDICTION WITH THE NEW RATINGS THAT THE NEW USER ADD
+  def predictionForNewUser(): Unit = {
+
+  }
+
+  
   //----------------------------------------------------------------------------
   //MAIN FUNCTION
 
@@ -125,6 +156,7 @@ object CollaborativeFilteringUserBasedALS {
     val titles = movies.map(line => line.split(",").take(2)).map(array => (array(0).toInt,array(1))).collectAsMap()
 
 
+    /*
     val algo = ALSAlgo(results)
 
     val predictionsWithoutMapping = predictionWithoutMapping(results,algo) // PREDICTIONS OF ALL USERS
@@ -142,6 +174,10 @@ object CollaborativeFilteringUserBasedALS {
     val mSError = MSE(algo,predictionsWithMapping)
     println("The mean square error of this model is: " + mSError)
 
+
+     */
+
+    topRated()
 
   }
 }
