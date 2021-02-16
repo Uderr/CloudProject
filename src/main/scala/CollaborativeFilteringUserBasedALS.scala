@@ -1,8 +1,9 @@
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.mllib.recommendation.{ALS, MatrixFactorizationModel, Rating}
-import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.SparkContext._
+import org.apache.spark.sql.functions.{desc, sum}
+
 
 object CollaborativeFilteringUserBasedALS {
 
@@ -10,6 +11,14 @@ object CollaborativeFilteringUserBasedALS {
   val conf = new SparkConf().setAppName("CollFilt").setMaster("local[*]")
   val sc = new SparkContext(conf)
   val sqlContext = new org.apache.spark.sql.SQLContext(sc)
+  val ss = SparkSession
+    .builder()
+    .master("local[*]")
+    .appName("Spark SQL basic example")
+    .config("spark.some.config.option", "some-value")
+    .getOrCreate()
+
+
 
   //DECLARATION OF DATASETS
   val data = sc.textFile("rating.csv")
@@ -60,11 +69,6 @@ object CollaborativeFilteringUserBasedALS {
   //SET OF FUNCTIONS USED FOR THE RECOMMENDATIONS
 
 
-  //FUNCTION USED FOR RESOLVE THE CASE OF A NEW USER
-  def topRatedForUnknownUser(): Unit = {
-    //COLD START
-  }
-
   //FUNCTION USED FOR RETURN THE n TOP RATED ITEM FOR THE USER u
   def topRatedForKnownUser(algoALS: MatrixFactorizationModel, user: Int, titles: scala.collection.Map[Int,String]): Array[Rating] = {
     val x = 30
@@ -94,6 +98,24 @@ object CollaborativeFilteringUserBasedALS {
   }
 
   //----------------------------------------------------------------------------
+  //COLD START
+
+  //FUNCTION USED FOR RESOLVE THE CASE OF A NEW USER
+  def topRated(): Array[Row] = {
+    import ss.implicits._
+
+    val data = ss.read.format("csv").option("header", "true").load("DatasetWithID/rating.csv")
+    val firstDataframe = data.groupBy("movieId").agg(sum("rating"))
+    val averagePerFilm = firstDataframe.withColumn("sum(rating)", $"sum(rating)" / 40144)
+    val sortedAverage = averagePerFilm.sort(desc("sum(rating)")).take(20)
+    sortedAverage.foreach(println)
+    sortedAverage
+  }
+
+
+
+
+  //----------------------------------------------------------------------------
   //MAIN FUNCTION
 
   def main(args: Array[String]): Unit = {
@@ -106,22 +128,19 @@ object CollaborativeFilteringUserBasedALS {
     val algo = ALSAlgo(results)
 
     val predictionsWithoutMapping = predictionWithoutMapping(results,algo) // PREDICTIONS OF ALL USERS
-    predictionsWithoutMapping.foreach(println)
+    //predictionsWithoutMapping.foreach(println)
 
     val predictionsWithMapping = predictionWithMapping(results,algo) // PREDICTIONS OF ALL USERS COMPARED TO THEIR RATES
-    predictionsWithMapping.foreach(println)
+    //predictionsWithMapping.foreach(println)
 
     topRatedForKnownUser(algo, 1,titles) //PREDICTIONS FOR USER 1 (30 PREDICTION FROM BETTER TO WORST)
 
 
     val singlePrediction = makeAPredictionForAUserAndAFilm(1,31,algo) //SINGLE PREDICTION OF USER 1 FOR MOVIE 31
 
-    println("ArrivePoint")
-
 
     val mSError = MSE(algo,predictionsWithMapping)
     println("The mean square error of this model is: " + mSError)
-
 
 
   }
