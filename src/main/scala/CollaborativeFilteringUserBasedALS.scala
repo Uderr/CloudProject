@@ -82,7 +82,6 @@ object CollaborativeFilteringUserBasedALS {
   def makeAPredictionForAUserAndAFilm(user: Int, movie: Int,algoALS: MatrixFactorizationModel): Long = {
     val predictRating = algoALS.predict(user,movie)
     val prediction = predictRating.round
-    //val recommendWIthNames =
     println("The user: " + user + " will like the movie: " + movie + " with an aproximately prediction of: " + prediction)
     prediction
   }
@@ -119,20 +118,41 @@ object CollaborativeFilteringUserBasedALS {
     val nameWithRating = dataframeMovieRating.select("title","sum(rating)").take(20)
 
     val nameOfRecommendedFilm = dataframeMovieRating.select("title").collect.map(_.getString(0)).take(20)
+    //nameOfRecommendedFilm.foreach(println)
 
     nameOfRecommendedFilm
 
   }
 
   //ASK A USER FEEDBACK FOR ALL TOP RATED FILMS AND ADD THE NEW RATINGS TO THE DATASET
-  def askUserInput(topRated: Array[String]): Array[Int] = {
-    val feedback = Array[Int](30)
-    for(i <- 5 to 10) {
+  def askUserInput(movieRecommended: Array[String]): Unit = {
+    val ratingArr = new Array[Int](3)
+    println("Insert rating (pay attention, rating must be between 0 and 5 in multiples of 0.5):")
+    for(iteration<- 0 to 2) {
 
-      feedback(i) = i
+      //CONTROLLO DEL VALORE
+      print(movieRecommended(iteration))
+      print(", how do you rate this film? ")
+      val personalRate = scala.io.StdIn.readInt()
+      ratingArr(iteration) = personalRate
     }
-    println(feedback)
-    feedback
+    ratingArr.foreach((element:Int)=> print(element + " "))
+
+
+    println("ArrivePoint")
+
+    val userId = 99999999
+    val resultOfRating = sc.parallelize(ratingArr zip movieRecommended)
+    resultOfRating.foreach(println)
+
+    /*
+    val resultWithID = resultOfRating.map((ratingArr) => Rating(userId, ,movieRecommended))
+    resultWithID.foreach(println)
+    resultWithID
+
+     */
+
+
   }
 
   //ASK A USER FEEDBACK FOR 10 RANDOM MOVIES AND ADD THE NEW RATINGS TO THE DATASET
@@ -145,7 +165,11 @@ object CollaborativeFilteringUserBasedALS {
 
   }
 
-  
+
+  def addToDataset(resultWithID: RDD[(Int,(Int,String))]): Unit = {
+
+  }
+
   //----------------------------------------------------------------------------
   //MAIN FUNCTION
 
@@ -177,7 +201,10 @@ object CollaborativeFilteringUserBasedALS {
 
      */
 
-    topRated()
+    val top = topRated()
+    //print(top(2))
+
+    askUserInput(top)
 
   }
 }
