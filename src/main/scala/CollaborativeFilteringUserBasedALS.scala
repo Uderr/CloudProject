@@ -1,9 +1,10 @@
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.mllib.recommendation.{ALS, MatrixFactorizationModel, Rating}
-import org.apache.spark.sql.{Dataset, Row, SparkSession}
+import org.apache.spark.sql.{DataFrame, Dataset, Row, SaveMode, SparkSession}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.functions.{desc, monotonically_increasing_id, sum}
-import org.apache.spark.sql.SaveMode
+import org.apache.spark.sql.functions.{desc, monotonically_increasing_id, rand, sum}
+
+import scala.util.Random
 
 
 object CollaborativeFilteringUserBasedALS {
@@ -23,8 +24,11 @@ object CollaborativeFilteringUserBasedALS {
 
 
   //DECLARATION OF DATASETS
-  val data = sc.textFile("Dataset/rating.csv")
+  val data = sc.textFile("DatasetWithID/test.csv")
   val movies = sc.textFile("Dataset/movie.csv")
+
+  val dataForRandom = ss.read.format("csv").option("header","true").load("DatasetWithID/test.csv")
+  val moviesForRandom = ss.read.format("csv").option("header","true").load("DatasetWithID/movie.csv")
 
 
   //----------------------------------------------------------------------------
@@ -104,17 +108,18 @@ object CollaborativeFilteringUserBasedALS {
   //COLD START - FUNCTIONS USED TO RESOLVE THE PROBLEM OF A NEW USER
 
   //FUNCTION USED FOR GENERATE 20 TOP RATED FILMS
-  def topRated(): Unit = {
+  def topRated(oldDataset: RDD[Rating]): Unit = {
     import ss.implicits._
 
     val data = ss.read.format("csv").option("header", "true").load("DatasetWithID/rating.csv")
     val movies = ss.read.format("csv").option("header","true").load("DatasetWithID/movie.csv")
     val movie = movies.withColumn("movieId", $"movieId".cast("Integer"))
 
+    println("Which of this top rated films do you like? ")
 
     val firstDataframe = data.groupBy("movieId").agg(sum("rating"))
       .withColumn("sum(rating)", $"sum(rating)" / 40144)
-    val dataframeMovieRating = movie.join(firstDataframe,movie("movieId") === firstDataframe("movieId"),"inner").drop(firstDataframe("movieId"))
+    val dataframeMovieRating = movies.join(firstDataframe,movie("movieId") === firstDataframe("movieId"),"inner").drop(firstDataframe("movieId"))
       .sort(desc("sum(rating)"))
 
     dataframeMovieRating.show()
@@ -125,19 +130,47 @@ object CollaborativeFilteringUserBasedALS {
     val idOfRecommendedFilm = dataframeMovieRating.select("movieId").collect.map(_.getInt(0)).take(20)
     idOfRecommendedFilm.foreach(println)
 
-    askUserInput(nameOfRecommendedFilm,idOfRecommendedFilm)
+    askUserInput(nameOfRecommendedFilm,idOfRecommendedFilm,oldDataset)
 
   }
 
+  def randomRecommender(oldDataset: RDD[Rating]): Unit = {
+    import ss.implicits._
+
+    val data = ss.read.format("csv").option("header", "true").load("DatasetWithID/rating.csv")
+    val movies = ss.read.format("csv").option("header","true").load("DatasetWithID/movie.csv")
+    val movie = movies.withColumn("movieId", $"movieId".cast("Integer"))
+
+    val onlySelectedUser = data.where("userId == 0")
+    //onlySelectedUser.show()
+
+    val dataframeWithoutUsers = data.except(onlySelectedUser)
+    //dataframeWithoutUsers.show()
+
+
+    val dataframeMovieRating = movie.join(dataframeWithoutUsers,movie("movieId") === dataframeWithoutUsers("movieId"),"inner").drop(dataframeWithoutUsers("movieId"))
+    //dataframeMovieRating.show()
+
+    val shuffledDF = dataframeMovieRating.orderBy(rand())
+    //shuffledDF.show()
+
+    val nameOfRandomFilm = shuffledDF.select("title").collect.map(_.getString(0)).take(20)
+    //nameOfRandomFilm.foreach(println)
+
+    val idOfRandomFilm = shuffledDF.select("movieId").collect.map(_.getInt(0)).take(20)
+    //idOfRandomFilm.foreach(println)
+
+
+    askUserInput(nameOfRandomFilm,idOfRandomFilm,oldDataset)
+
+  }
+
+
   //ASK A USER FEEDBACK FOR ALL TOP RATED FILMS AND ADD THE NEW RATINGS TO THE DATASET
-
-
-
   //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  //VERIFICARE CHE NON SIANO CHIESTI VOTI SU FILM GIA' VISTI
   //CHECK SULL'INPUT = STRINGA
   //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  def askUserInput(movieRecommended: Array[String],movieID: Array[Int]): Unit = {
+  def askUserInput(movieRecommended: Array[String],movieID: Array[Int],oldDataset: RDD[Rating]): Unit = {
     import ss.implicits._
 
     val ratingArr = new Array[Double](21)
@@ -177,18 +210,20 @@ object CollaborativeFilteringUserBasedALS {
     val finalData1 = dataUserIDForJoin.join(datMovIDForJoin, Seq("id"))
     val finalData2 = finalData1.join((dataRatForJoin), Seq("id")).drop("id").orderBy("movieId")
     finalData2.show()
-    
-  }
+    val finalDataRDDRating = finalData2.select("userId", "movieId", "rating").rdd.map(r => Rating(r.getInt(0), r.getInt(1),r.getDouble(2)))
+    finalDataRDDRating.foreach(println)
 
-  //ASK A USER FEEDBACK FOR 10 RANDOM MOVIES AND ADD THE NEW RATINGS TO THE DATASET
-  def addFilmForNewUser(): Unit = {
-
-  }
-
-  //MAKE A PREDICTION WITH THE NEW RATINGS THAT THE NEW USER ADD
-  def predictionForNewUser(): Unit = {
+    updateModel(oldDataset,finalDataRDDRating)
 
   }
+
+  def updateModel(oldDataset: RDD[Rating], newDataset: RDD[Rating]): MatrixFactorizationModel = {
+    val updatedDataset = oldDataset.union(newDataset)
+    updatedDataset.foreach(println)
+    val newAlgo = ALSAlgo(updatedDataset)
+    newAlgo
+  }
+
 
   //----------------------------------------------------------------------------
   //MAIN FUNCTION
@@ -198,6 +233,8 @@ object CollaborativeFilteringUserBasedALS {
     //CREATION OF TUPLES
     val results = data.map(ratingCreation)
     val titles = movies.map(line => line.split(",").take(2)).map(array => (array(0).toInt,array(1))).collectAsMap()
+
+    //val rddMl = dataForRecc.select("userId", "movieId", "rating").rdd.map(r => Rating(r.getString(0).toInt, r.getString(1).toInt,r.getString(2).toDouble))
 
 
     /*
@@ -221,8 +258,13 @@ object CollaborativeFilteringUserBasedALS {
 
      */
 
-    val top = topRated()
+
+
+    //val top = topRated(results)
     //print(top(2))
+
+
+    randomRecommender(results)
 
 
   }
