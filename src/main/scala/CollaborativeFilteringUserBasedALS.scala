@@ -77,7 +77,7 @@ object CollaborativeFilteringUserBasedALS {
 
   //FUNCTION USED FOR RETURN THE n TOP RATED ITEM FOR THE USER u
   def topRatedForKnownUser(algoALS: MatrixFactorizationModel, user: Int, titles: scala.collection.Map[Int,String]): Array[Rating] = {
-    val x = 30
+    val x = 20
     val recommendProducts = algoALS.recommendProducts(user,x)
     println("Top " + x + " film suggested for user " + user + ":")
     recommendProducts.map(rating => (titles(rating.product))).foreach(println)
@@ -86,17 +86,13 @@ object CollaborativeFilteringUserBasedALS {
   }
 
   //FUNCTION THAT, TAKING IN INPUT AN OBJECT ID AND A USER ID, RETURN THE PREDICTION OF RATING FOR THAT OBJECT
-  def makeAPredictionForAUserAndAFilm(user: Int, movie: Int,algoALS: MatrixFactorizationModel): Long = {
+  def makeAPredictionForAUserAndAFilm(user: Int, movie: Int,algoALS: MatrixFactorizationModel): Unit = {
     val predictRating = algoALS.predict(user,movie)
     val prediction = predictRating.round
-    val movieName = moviesForRandom.where("movieId ==" + movie)
-    val movieNameOnly = movieName.select("title")
-    println(movieNameOnly)
-    val test = movieNameOnly.toString()
-    println("ciao " + test)
+    val movieNameRow = moviesForRandom.where("movieId ==" + movie)
+    val movieNameOnly = movieNameRow.select("title").collect.map(_.getString(0))
 
-    println("The user: " + user + " will like the movie: " + movie + " with an aproximately prediction of: " + prediction)
-    prediction
+    println("The user: " + user + " will like the movie: " + movieNameOnly(0) + " with an aproximately prediction of: " + prediction)
   }
 
 
@@ -114,7 +110,12 @@ object CollaborativeFilteringUserBasedALS {
   //----------------------------------------------------------------------------
   //COLD START - FUNCTIONS USED TO RESOLVE THE PROBLEM OF A NEW USER
 
+
   //FUNCTION USED FOR GENERATE 20 TOP RATED FILMS
+  //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  //CAMBIARE SE FILM NON VISTO
+  //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
   def topRated(): (Array[String], Array[Int]) = {
     import ss.implicits._
 
@@ -122,7 +123,7 @@ object CollaborativeFilteringUserBasedALS {
     val movies = ss.read.format("csv").option("header","true").load("DatasetWithID/movie.csv")
     val movie = movies.withColumn("movieId", $"movieId".cast("Integer"))
 
-    println("Which of this top rated films do you like? ")
+    println("------------------------ TOP RATED PREFERENCES ------------------------ ")
 
     val firstDataframe = data.groupBy("movieId").agg(sum("rating"))
       .withColumn("sum(rating)", $"sum(rating)" / 40144)
@@ -143,12 +144,19 @@ object CollaborativeFilteringUserBasedALS {
   }
 
   //FUNCTION USED TO RECOMMEND 20 RANDOM MOVIES
+
+  //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  //CAMBIARE SE FILM NON VISTO
+  //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
   def randomRecommender(): (Array[String],Array[Int]) = {
     import ss.implicits._
 
     val data = ss.read.format("csv").option("header", "true").load("DatasetWithID/rating.csv")
     val movies = ss.read.format("csv").option("header","true").load("DatasetWithID/movie.csv")
     val movie = movies.withColumn("movieId", $"movieId".cast("Integer"))
+
+    println("------------------------ RANDOM PREFERENCES ------------------------ ")
 
     val onlySelectedUser = data.where("userId == 0")
     //onlySelectedUser.show()
@@ -174,11 +182,6 @@ object CollaborativeFilteringUserBasedALS {
 
   }
 
-
-  //ASK A USER FEEDBACK FOR ALL TOP RATED AND RANDOM FILMS AND ADD THE NEW RATINGS TO THE DATASET
-  //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  //CHECK SULL'INPUT = STRINGA
-  //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   //ASK USER INPUT ABOUT RANDOM AND TOP RATED FILMS AND UPDATE THE MODEL
   def askUserInput(idAndName: (Array[String], Array[Int]),oldDataset: RDD[Rating]): RDD[Rating] = {
     import ss.implicits._
@@ -187,21 +190,24 @@ object CollaborativeFilteringUserBasedALS {
     val movieID = idAndName._2
 
     val ratingArr = new Array[Double](21)
-    println("Insert rating (pay attention, rating must be between 0 and 5 in multiples of 0.5):")
-
+    println("Insert rating (pay attention, rating must be between 0 and 5):")
     for(iteration<- 0 to 19) {
+      val prompt = "\n" + movieRecommended(iteration)
       print(movieRecommended(iteration))
       print(", how do you rate this film? ")
-      var personalRate = scala.io.StdIn.readDouble()
-      while((personalRate > 5 || personalRate < 1) || personalRate % 0.5 != 0) {
-          println("Error: respect the parameters")
+
+      ratingArr(iteration) = Iterator.iterate(-1)(_ => Try(scala.io.StdIn.readLine().toInt).fold(_ =>
+        {println("Error: this isn't a number")
           print(movieRecommended(iteration))
-          print(", how do you rate this film? ")
-          personalRate = scala.io.StdIn.readDouble()
-      }
-    ratingArr(iteration) = personalRate
+          print(", how do you rate this film? ");-1}
+          , n => if (n < 1 || n > 5) {
+            println("Error: check the range")
+            print(movieRecommended(iteration))
+            print(", how do you rate this film? "); -1}
+          else n)
+      ).dropWhile(_ < 0).next
     }
-    ratingArr.foreach((element:Double)=> print(element + " "))
+
 
     val userId = Array(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
 
@@ -229,7 +235,7 @@ object CollaborativeFilteringUserBasedALS {
 
     val updatedDataset = oldDataset.union(finalDataRDDRating)
 
-    updatedDataset.foreach(println)
+    //updatedDataset.foreach(println)
 
     updatedDataset
 
@@ -239,17 +245,15 @@ object CollaborativeFilteringUserBasedALS {
   //ADDING THE NEW RATINGS TO THE DATASET
   def updateModel(oldDataset: RDD[Rating], newDataset: RDD[Rating]): RDD[Rating] = {
 
-    println("ArrivePoint")
     val updatedDataset = oldDataset.union(newDataset)
     updatedDataset
 
   }
 
 
-
-
   //----------------------------------------------------------------------------
   //MAIN FUNCTION
+
 
   def main(args: Array[String]): Unit = {
 
@@ -258,8 +262,6 @@ object CollaborativeFilteringUserBasedALS {
     val results = data.map(ratingCreation)
     val titles = movies.map(line => line.split(",").take(2)).map(array => (array(0).toInt,array(1))).collectAsMap()
 
-
-    /*
     //----------------------------------------------------------------------------
     //SET OF THE ALS ALGORITHM
     val algo = ALSAlgo(results)
@@ -274,36 +276,40 @@ object CollaborativeFilteringUserBasedALS {
 
     //----------------------------------------------------------------------------
     //PREDICTION FOR A KNOWN USER
+    println("------------------------ PREDICTIONS FOR A KNOWN USER ------------------------")
+
     topRatedForKnownUser(algo, 1,titles) //PREDICTIONS FOR USER 1 (30 PREDICTION FROM BETTER TO WORST)
+    makeAPredictionForAUserAndAFilm(1,31,algo) //SINGLE PREDICTION OF USER 1 FOR MOVIE 31
 
-    val singlePrediction = makeAPredictionForAUserAndAFilm(1,31,algo) //SINGLE PREDICTION OF USER 1 FOR MOVIE 31
-    println(singlePrediction)
-
-     */
-    //----------------------------------------------------------------------------
-    //PREDICTION FOR NEW USER
-    val topRatedFilms = topRated()
-    val randomFilms = randomRecommender()
 
     //----------------------------------------------------------------------------
     //PREDICTION FOR NEW USER ACCORDING TO THE TOP RATED FILM'S RATINGS
+
+
+    val topRatedFilms = topRated()
+
     val newDatasetTopRated = askUserInput(topRatedFilms,results)
     val updatedDataset = updateModel(results,newDatasetTopRated)
     val newAlgoForTopRated = ALSAlgo(updatedDataset)
 
 
-    println("First 30 recommended films based on your expressed preferences: ")
+    println("------------------------ RECOMMENDED MOVIES ------------------------")
+
+    println("30 recommended films based on your expressed preferences: ")
     topRatedForKnownUser(newAlgoForTopRated,0,titles)
-    val singlePredictionForMe = makeAPredictionForAUserAndAFilm(0,329,newAlgoForTopRated)
-    println(singlePredictionForMe)
-    println("-------------------------------------------------")
+
+
+    makeAPredictionForAUserAndAFilm(0,329,newAlgoForTopRated)
 
     //----------------------------------------------------------------------------
     //PREDICTION FOR NEW USER ACCORDING TO TOP RATED AND RANDOM FILM'S RATINGS
+    val randomFilms = randomRecommender()
+
     val newDatasetRandom = askUserInput(randomFilms,updatedDataset)
     val updatedAgain = updateModel(updatedDataset,newDatasetRandom)
     val newAlgoForRandom = ALSAlgo(updatedAgain)
 
+    println("30 recommended films based on your expressed preferences for random films: ")
 
 
   }
