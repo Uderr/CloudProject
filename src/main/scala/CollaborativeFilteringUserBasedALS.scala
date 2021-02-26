@@ -2,7 +2,8 @@ import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.mllib.recommendation.{ALS, MatrixFactorizationModel, Rating}
 import org.apache.spark.sql.{DataFrame, Dataset, Row, SaveMode, SparkSession}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.functions.{desc, monotonically_increasing_id, rand, sum}
+import org.apache.spark.sql.functions.{desc, lit, monotonically_increasing_id, rand, sum}
+
 import scala.util.{Random, Try}
 
 
@@ -22,13 +23,12 @@ object CollaborativeFilteringUserBasedALS {
   //REMOVE LOGS FROM TERMINAL
   ss.sparkContext.setLogLevel("WARN")
 
-
   //DECLARATION OF DATASETS
   val data = sc.textFile("Dataset/rating.csv")
   val movies = sc.textFile("Dataset/movie.csv")
 
-  val dataForRandom = ss.read.format("csv").option("header","true").load("DatasetWithID/rating.csv")
   val moviesForRandom = ss.read.format("csv").option("header","true").load("DatasetWithID/movie.csv")
+
 
 
   //----------------------------------------------------------------------------
@@ -40,9 +40,9 @@ object CollaborativeFilteringUserBasedALS {
   }
 
 
+
   //----------------------------------------------------------------------------
   //SET OF FUNCTIONS USED TO CREATE MAPPED VALUES
-
 
   //DEFINITION OF A FUNCTION THAT, RECEIVING AN RDD[String] RETURN A Rating
   def ratingCreation(line: String): Rating = {
@@ -71,9 +71,9 @@ object CollaborativeFilteringUserBasedALS {
   }
 
 
+
   //----------------------------------------------------------------------------
   //SET OF FUNCTIONS USED FOR THE RECOMMENDATIONS
-
 
   //FUNCTION USED FOR RETURN THE n TOP RATED ITEM FOR THE USER u
   def topRatedForKnownUser(algoALS: MatrixFactorizationModel, user: Int, titles: scala.collection.Map[Int,String]): Array[Rating] = {
@@ -96,6 +96,7 @@ object CollaborativeFilteringUserBasedALS {
   }
 
 
+
   //----------------------------------------------------------------------------
   //MEAN SQUARE ERROR OF THE MODEL
   def MSE(algoALS: MatrixFactorizationModel,predictionWithMapping: RDD[((Int, Int), (Double, Double))]): Double = {
@@ -107,15 +108,11 @@ object CollaborativeFilteringUserBasedALS {
   }
 
 
+
   //----------------------------------------------------------------------------
   //COLD START - FUNCTIONS USED TO RESOLVE THE PROBLEM OF A NEW USER
 
-
   //FUNCTION USED FOR GENERATE 20 TOP RATED FILMS
-  //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  //CAMBIARE SE FILM NON VISTO
-  //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
   def topRated(): (Array[String], Array[Int]) = {
     import ss.implicits._
 
@@ -132,10 +129,10 @@ object CollaborativeFilteringUserBasedALS {
 
     //dataframeMovieRating.show()
 
-    val nameOfRecommendedFilm = dataframeMovieRating.select("title").collect.map(_.getString(0)).take(20)
+    val nameOfRecommendedFilm = dataframeMovieRating.select("title").collect.map(_.getString(0)).take(150)
     //nameOfRecommendedFilm.foreach(println)
 
-    val idOfRecommendedFilm = dataframeMovieRating.select("movieId").collect.map(_.getInt(0)).take(20)
+    val idOfRecommendedFilm = dataframeMovieRating.select("movieId").collect.map(_.getInt(0)).take(150)
     //idOfRecommendedFilm.foreach(println)
 
 
@@ -144,13 +141,11 @@ object CollaborativeFilteringUserBasedALS {
   }
 
   //FUNCTION USED TO RECOMMEND 20 RANDOM MOVIES
-
-  //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  //CAMBIARE SE FILM NON VISTO
-  //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-  def randomRecommender(): (Array[String],Array[Int]) = {
+  def randomRecommender(oldDataset: RDD[Rating]): (Array[String],Array[Int]) = {
     import ss.implicits._
+
+    val oldDat = oldDataset.toDF()
+    //test.show(80)
 
     val data = ss.read.format("csv").option("header", "true").load("DatasetWithID/rating.csv")
     val movies = ss.read.format("csv").option("header","true").load("DatasetWithID/movie.csv")
@@ -158,23 +153,23 @@ object CollaborativeFilteringUserBasedALS {
 
     println("------------------------ RANDOM PREFERENCES ------------------------ ")
 
-    val onlySelectedUser = data.where("userId == 0")
-    //onlySelectedUser.show()
+    var onlySelectedMovies = oldDat.where("user == 0")
+    //onlySelectedMovies.show(30)
 
-    val dataframeWithoutUsers = data.except(onlySelectedUser)
-    //dataframeWithoutUsers.show()
+    val renamedOnlySelectedMovies = onlySelectedMovies.toDF("userId","movieId","rating")
 
 
-    val dataframeMovieRating = movie.join(dataframeWithoutUsers,movie("movieId") === dataframeWithoutUsers("movieId"),"inner").drop(dataframeWithoutUsers("movieId"))
-    //dataframeMovieRating.show()
+
+    val dataframeMovieRating = movie.join(renamedOnlySelectedMovies,movie("movieId") === renamedOnlySelectedMovies("movieId"),"left_anti").drop(renamedOnlySelectedMovies("movieId"))
+
+    print("\n")
 
     val shuffledDF = dataframeMovieRating.orderBy(rand())
-    //shuffledDF.show()
 
-    val nameOfRandomFilm = shuffledDF.select("title").collect.map(_.getString(0)).take(20)
+    val nameOfRandomFilm = shuffledDF.select("title").collect.map(_.getString(0)).take(150)
     //nameOfRandomFilm.foreach(println)
 
-    val idOfRandomFilm = shuffledDF.select("movieId").collect.map(_.getInt(0)).take(20)
+    val idOfRandomFilm = shuffledDF.select("movieId").collect.map(_.getInt(0)).take(150)
     //idOfRandomFilm.foreach(println)
 
 
@@ -189,35 +184,53 @@ object CollaborativeFilteringUserBasedALS {
     val movieRecommended = idAndName._1
     val movieID = idAndName._2
 
-    val ratingArr = new Array[Double](21)
-    println("Insert rating (pay attention, rating must be between 0 and 5):")
-    for(iteration<- 0 to 19) {
-      val prompt = "\n" + movieRecommended(iteration)
-      print(movieRecommended(iteration))
+    val movieNameArray = new Array[String](20)
+    val movieIDArray = new Array[Int](20)
+
+    val ratingArr = new Array[Double](20)
+    println("Insert rating (pay attention, rating must be between 0 and 5)[If you don't know the movie, enter 6 to skip it]:"); print("\n")
+
+    var iteration = 0
+    var filmNumber = 0
+
+    while(iteration <= 19) {
+      print(movieRecommended(filmNumber))
       print(", how do you rate this film? ")
-
-      ratingArr(iteration) = Iterator.iterate(-1)(_ => Try(scala.io.StdIn.readLine().toInt).fold(_ =>
-        {println("Error: this isn't a number")
-          print(movieRecommended(iteration))
-          print(", how do you rate this film? ");-1}
-          , n => if (n < 1 || n > 5) {
+        Try(scala.io.StdIn.readLine().toInt).fold(_ =>
+        {
+          println("Error: this isn't a number")
+          iteration
+        }
+          , n => if (n == 6) {
+            print("\nGoing to next film\n\n");
+            filmNumber = filmNumber + 1
+            iteration
+          }else if(n < 1 || n > 6) {
             println("Error: check the range")
-            print(movieRecommended(iteration))
-            print(", how do you rate this film? "); -1}
-          else n)
-      ).dropWhile(_ < 0).next
+            iteration
+          }
+          else {
+            movieNameArray(iteration) = movieRecommended(filmNumber)
+            movieIDArray(iteration) = movieID(filmNumber)
+            ratingArr(iteration) = n
+            filmNumber = filmNumber + 1
+            iteration = iteration + 1
+            n
+          })
     }
-
 
     val userId = Array(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
 
 
     val resultOfRating = sc.parallelize(ratingArr)
-    val movieIdentification = sc.parallelize(movieID)
+    val movieIdentification = sc.parallelize(movieIDArray)
     val userID = sc.parallelize(userId)
 
+
     val dataframeResultOfRating = resultOfRating.map(rate => rate).toDF("rating")
+    //dataframeResultOfRating.show()
     val dataframeMovieID = movieIdentification.map(a => a).toDF("movieId")
+    //dataframeMovieID.show()
     val dataframeUserID = userID.map(a => a).toDF("userId")
 
 
@@ -233,12 +246,11 @@ object CollaborativeFilteringUserBasedALS {
     val finalDataRDDRating = finalData2.select("userId", "movieId", "rating").rdd.map(r => Rating(r.getInt(0), r.getInt(1),r.getDouble(2)))
     //finalDataRDDRating.foreach(println)
 
-    val updatedDataset = oldDataset.union(finalDataRDDRating)
+    print("\n")
 
-    //updatedDataset.foreach(println)
+    print("Thank you for your feedback! \n \n")
 
-    updatedDataset
-
+    finalDataRDDRating
 
   }
 
@@ -251,66 +263,108 @@ object CollaborativeFilteringUserBasedALS {
   }
 
 
+
+
+
+
   //----------------------------------------------------------------------------
   //MAIN FUNCTION
 
-
   def main(args: Array[String]): Unit = {
+
 
     //----------------------------------------------------------------------------
     //CREATION OF TUPLES
     val results = data.map(ratingCreation)
     val titles = movies.map(line => line.split(",").take(2)).map(array => (array(0).toInt,array(1))).collectAsMap()
 
+
     //----------------------------------------------------------------------------
     //SET OF THE ALS ALGORITHM
-    val algo = ALSAlgo(results)
+    var actualAlsAlgorithm = ALSAlgo(results)
+
 
     //----------------------------------------------------------------------------
     //CALCULATION OF THE MEAN SQUARE ERROR
-    val predictionsWithMapping = predictionWithMapping(results,algo) // PREDICTIONS OF ALL USERS COMPARED TO THEIR RATES
+    val predictionsWithMapping = predictionWithMapping(results,actualAlsAlgorithm) // PREDICTIONS OF ALL USERS COMPARED TO THEIR RATES
     //predictionsWithMapping.foreach(println)
 
-    val mSError = MSE(algo,predictionsWithMapping)
+    val mSError = MSE(actualAlsAlgorithm,predictionsWithMapping)
     println("The mean square error of this model is: " + mSError)
 
-    //----------------------------------------------------------------------------
-    //PREDICTION FOR A KNOWN USER
-    println("------------------------ PREDICTIONS FOR A KNOWN USER ------------------------")
-
-    topRatedForKnownUser(algo, 1,titles) //PREDICTIONS FOR USER 1 (30 PREDICTION FROM BETTER TO WORST)
-    makeAPredictionForAUserAndAFilm(1,31,algo) //SINGLE PREDICTION OF USER 1 FOR MOVIE 31
-
 
     //----------------------------------------------------------------------------
-    //PREDICTION FOR NEW USER ACCORDING TO THE TOP RATED FILM'S RATINGS
+    //MAIN MENU
+    var actualDataset = results
 
 
-    val topRatedFilms = topRated()
+    print("What you want to do?\n")
+    print("- Press 0 to shut down the programm\n")
+    print("- Press 1 to rate 20 top rated films\n")
 
-    val newDatasetTopRated = askUserInput(topRatedFilms,results)
-    val updatedDataset = updateModel(results,newDatasetTopRated)
-    val newAlgoForTopRated = ALSAlgo(updatedDataset)
+    print("Selection: ")
 
+    var signal = 0
+    var counter = 3
 
-    println("------------------------ RECOMMENDED MOVIES ------------------------")
-
-    println("30 recommended films based on your expressed preferences: ")
-    topRatedForKnownUser(newAlgoForTopRated,0,titles)
-
-
-    makeAPredictionForAUserAndAFilm(0,329,newAlgoForTopRated)
-
-    //----------------------------------------------------------------------------
-    //PREDICTION FOR NEW USER ACCORDING TO TOP RATED AND RANDOM FILM'S RATINGS
-    val randomFilms = randomRecommender()
-
-    val newDatasetRandom = askUserInput(randomFilms,updatedDataset)
-    val updatedAgain = updateModel(updatedDataset,newDatasetRandom)
-    val newAlgoForRandom = ALSAlgo(updatedAgain)
-
-    println("30 recommended films based on your expressed preferences for random films: ")
-
-
+    while(counter != 0) {
+      if (signal == 0) { //CHECK IF USER ALREADY RATE TOP RATED FILMS
+        val choose = scala.io.StdIn.readLine()
+        Try(choose.toInt).toOption match {
+          case Some(rate) => {
+            if (rate == 0) { //IF INPUT IS 0 EXIT FROM WHILE AND FINISH PROCESS
+              counter = 0
+            }else if (rate == 1) { //IF INPUT IS 1 ASK USER RATE FOR TOP RATED FILMS
+              val topRatedFilms = topRated()
+              val newDatasetTopRated = askUserInput(topRatedFilms, results)
+              val updatedDataset = updateModel(results, newDatasetTopRated)
+              actualDataset = updatedDataset
+              actualAlsAlgorithm = ALSAlgo(updatedDataset)
+              signal = 1
+            }else {
+              print("Error: check range\n"); print("Selection: ")
+            }
+          }
+          case _ =>
+            println("Error: check type of your input"); print("Selection: ")
+        }
+      }else{ //IF USER DON'T RATE TOP RATED FILM THEN:
+        print("What you want to do now?\n")
+        print("- Press 0 to shut down the programm\n")
+        print("- Press 2 to rate 20 random films\n")
+        print("- Press 3 to see top rated films for you\n")
+        val choose = scala.io.StdIn.readLine()
+        Try(choose.toInt).toOption match {
+          case Some(rate) => {
+            if (rate == 0) { //EXIT FROM WHILE CYCLE
+              counter = 0
+            }else if (rate == 2) { //IF INPUT IS 2 ASK RATE FOR RANDOM MOVIES
+              val randomFilms = randomRecommender(actualDataset)
+              val newDatasetRandom = askUserInput(randomFilms, actualDataset)
+              val updatedAgain = updateModel(actualDataset, newDatasetRandom)
+              actualDataset = updatedAgain
+              actualAlsAlgorithm = ALSAlgo(actualDataset)
+            }else if(rate == 3){ //IF INPUT IS 3 PRINT RECOMMENDED MOVIES BASED ON PREVIOUS USER PREFERENCES
+              println("------------------------ RECOMMENDED MOVIES ------------------------")
+              println("20 recommended films for you: ")
+              topRatedForKnownUser(actualAlsAlgorithm, 0, titles)
+              print(" \n "); print(" \n ")
+            }else {
+              print("Error: check range\n")
+              print("Selection: ")
+            }
+          }
+          case _ =>
+            println("Error: check type of your input")
+            print("Selection: ")
+        }
+      }
+    }
+    print("Thank you, bye!")
   }
+
+
+
+
 }
+
