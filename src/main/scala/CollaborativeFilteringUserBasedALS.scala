@@ -2,9 +2,13 @@ import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.mllib.recommendation.{ALS, MatrixFactorizationModel, Rating}
 import org.apache.spark.sql.{DataFrame, Dataset, Row, SaveMode, SparkSession}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.functions.{desc, lit, monotonically_increasing_id, rand, sum}
+import org.apache.spark.sql.expressions.Window
+import org.apache.spark.sql.functions.{col, desc, lit, monotonically_increasing_id, rand, sum}
 
 import scala.util.{Random, Try}
+
+
+
 
 
 object CollaborativeFilteringUserBasedALS {
@@ -26,6 +30,8 @@ object CollaborativeFilteringUserBasedALS {
   //DECLARATION OF DATASETS
   val data = sc.textFile("Dataset/rating.csv")
   val movies = sc.textFile("Dataset/movie.csv")
+
+  val smallerData = sc.textFile("Dataset/test.csv")
 
   val moviesForRandom = ss.read.format("csv").option("header","true").load("DatasetWithID/movie.csv")
 
@@ -264,6 +270,115 @@ object CollaborativeFilteringUserBasedALS {
 
 
 
+  //----------------------------------------------------------------------------
+  //FUNCTIONS USED TO CALCULATE PREDICTIONS BASED ON COSINE SIMILARITY
+
+  //FUNCTION USED TO CALCULATE COSINE SIMILARITY OF USER USER 0 AND ALL OTHERS USERS
+  def cosineSimilarity(results: DataFrame): Dataset[Row] = {
+
+    import org.apache.spark.sql.functions._
+
+    val firstResults = results
+    var allUserAndRating = firstResults.join(results,firstResults("movieId") === results("movieId"), "full").distinct()
+    allUserAndRating = allUserAndRating.toDF("userId1","movieId","rat1","userId2","movieId2","rat2").drop("movieId2")
+    val removeSameUser = allUserAndRating.where("userId1 != userId2").orderBy("userId1","userId2")
+
+    var cosSim = removeSameUser.withColumn(
+      "rat1",    // normalize rat1
+      coalesce(
+        col("rat1") / sqrt(sum(col("rat1") * col("rat1")).over(Window.partitionBy("userId1"))),
+        lit(0)
+      )
+    ).withColumn(
+      "rat2",    // normalize rat2
+      coalesce(
+        col("rat2") / sqrt(sum(col("rat2") * col("rat2")).over(Window.partitionBy("userId2"))),
+        lit(0)
+      )
+    ).withColumn(
+      "rat1_times_rat2",
+      col("rat1") * col("rat2")
+    ).groupBy("userId1", "userId2").agg(sum("rat1_times_rat2").alias("cosineSim")).orderBy("userId1")
+
+
+
+    cosSim = cosSim.where("userId1 ==" + 0).orderBy(desc("cosineSim"))
+
+
+
+    cosSim
+  }
+
+  //FUNCTION USED TO CALCULATE PREDICTIONS ACCORDING TO COSINE SIMILARITY
+  def calculateMovieBasedOnSimilarity(cosSim: Dataset[Row], oldData: RDD[Rating]): RDD[Rating] ={
+
+    import ss.implicits._
+
+    val oldDat = oldData.toDF("userId","movieId","rating")
+    //cosSim.show()
+
+
+    val movies = ss.read.format("csv").option("header","true").load("DatasetWithID/movie.csv")
+    val movie = movies.withColumn("movieId", col("movieId").cast("Integer"))
+
+    val onlySelectedMovies = oldDat.where("userId == 0")
+    val renamedOnlySelectedMovies = onlySelectedMovies.toDF("userId","movieId","rating")
+    val dataframeMovieRating = movie.join(renamedOnlySelectedMovies,movie("movieId") === renamedOnlySelectedMovies("movieId"),"left_anti")
+      .drop(renamedOnlySelectedMovies("movieId"))
+
+    dataframeMovieRating.where("movieId = 296").show()
+
+    val tableWithDuplicateMovies = cosSim.join(oldDat, oldDat("userId") === cosSim("userId2"), "right")
+      .drop(cosSim("userId1"))
+      .drop(oldDat("userId"))
+      .where(col("userId2").isNotNull)
+    val completeTable = tableWithDuplicateMovies.join(dataframeMovieRating,tableWithDuplicateMovies("movieId") === dataframeMovieRating("movieId"),"inner")
+      .drop("type")
+      .drop(tableWithDuplicateMovies("movieId"))
+      .toDF("userId","cosSim","rating","movieId","title")
+      .withColumn("ratePred", col("rating")*col("cosSim"))
+      .orderBy(desc("cosSim"),desc("rating"))
+    //completeTable.show()
+
+    val test = completeTable.join(completeTable.groupBy("movieId").sum("ratePred"), Seq("movieId"))
+    //test.show()
+
+    val tes2 = test.join(test.groupBy("movieId").sum("cosSim"), Seq("movieId"))
+    //tes2.show()
+
+    val test3 = tes2.withColumn("rating",col("sum(ratePred)") / col("sum(cosSim)"))
+      .drop("cosSim","userId","ratePred","sum(ratePred)","sum(cosSim)").withColumn("userId",lit(0))
+      .distinct()
+      .orderBy("rating")
+      .limit(20)
+
+    val finalDataRDDRating = test3.select("userId", "movieId", "rating").rdd.map(r => Rating(r.getInt(0), r.getInt(1),r.getDouble(2)))
+
+
+    val nameOfFilm = test3.select("title").collect().map(_.getString(0))
+
+    val rateOfFilm = test3.select("rating").collect.map(_.getDouble(0))
+
+    val counter = nameOfFilm.length
+    print("\n \n According to the cosine similarity you may like the films: \n")
+    for(i <- 0 to counter - 1){
+      print(nameOfFilm(i) + " with an aproximate rate of " + rateOfFilm(i) + "\n")
+    }
+    print("\n \n")
+
+
+    finalDataRDDRating
+
+  }
+
+
+
+
+
+
+
+
+
 
 
 
@@ -277,6 +392,7 @@ object CollaborativeFilteringUserBasedALS {
     //CREATION OF TUPLES
     val results = data.map(ratingCreation)
     val titles = movies.map(line => line.split(",").take(2)).map(array => (array(0).toInt,array(1))).collectAsMap()
+    val smallResults = smallerData.map(ratingCreation)
 
 
     //----------------------------------------------------------------------------
@@ -290,13 +406,15 @@ object CollaborativeFilteringUserBasedALS {
     //predictionsWithMapping.foreach(println)
 
     val mSError = MSE(actualAlsAlgorithm,predictionsWithMapping)
-    println("The mean square error of this model is: " + mSError)
+    println("(ALS) The mean square error of this model is: " + mSError)
 
 
     //----------------------------------------------------------------------------
     //MAIN MENU
-    var actualDataset = results
 
+    //VARIABLES USED TO REMEMBER USER PREFERENCES
+    var actualDataset = results
+    var actualSmallerDataset = smallResults
 
     print("What you want to do?\n")
     print("- Press 0 to shut down the programm\n")
@@ -307,6 +425,7 @@ object CollaborativeFilteringUserBasedALS {
     var signal = 0
     var counter = 3
 
+    //MAIN MENU
     while(counter != 0) {
       if (signal == 0) { //CHECK IF USER ALREADY RATE TOP RATED FILMS
         val choose = scala.io.StdIn.readLine()
@@ -317,9 +436,9 @@ object CollaborativeFilteringUserBasedALS {
             }else if (rate == 1) { //IF INPUT IS 1 ASK USER RATE FOR TOP RATED FILMS
               val topRatedFilms = topRated()
               val newDatasetTopRated = askUserInput(topRatedFilms, results)
-              val updatedDataset = updateModel(results, newDatasetTopRated)
-              actualDataset = updatedDataset
-              actualAlsAlgorithm = ALSAlgo(updatedDataset)
+              actualDataset = updateModel(actualDataset, newDatasetTopRated)
+              actualAlsAlgorithm = ALSAlgo(actualDataset)
+              actualSmallerDataset = updateModel(actualSmallerDataset, newDatasetTopRated)
               signal = 1
             }else {
               print("Error: check range\n"); print("Selection: ")
@@ -333,6 +452,7 @@ object CollaborativeFilteringUserBasedALS {
         print("- Press 0 to shut down the programm\n")
         print("- Press 2 to rate 20 random films\n")
         print("- Press 3 to see top rated films for you\n")
+        print("- Press 4 to see movies that you can like according to cosine similarity\n")
         val choose = scala.io.StdIn.readLine()
         Try(choose.toInt).toOption match {
           case Some(rate) => {
@@ -341,14 +461,23 @@ object CollaborativeFilteringUserBasedALS {
             }else if (rate == 2) { //IF INPUT IS 2 ASK RATE FOR RANDOM MOVIES
               val randomFilms = randomRecommender(actualDataset)
               val newDatasetRandom = askUserInput(randomFilms, actualDataset)
-              val updatedAgain = updateModel(actualDataset, newDatasetRandom)
-              actualDataset = updatedAgain
+              actualDataset = updateModel(actualDataset, newDatasetRandom)
               actualAlsAlgorithm = ALSAlgo(actualDataset)
-            }else if(rate == 3){ //IF INPUT IS 3 PRINT RECOMMENDED MOVIES BASED ON PREVIOUS USER PREFERENCES
+            }else if(rate == 3) { //IF INPUT IS 3 PRINT RECOMMENDED MOVIES BASED ON PREVIOUS USER PREFERENCES
               println("------------------------ RECOMMENDED MOVIES ------------------------")
               println("20 recommended films for you: ")
               topRatedForKnownUser(actualAlsAlgorithm, 0, titles)
-              print(" \n "); print(" \n ")
+              print(" \n ");
+              print(" \n ")
+            }else if(rate == 4){ //IF INPUT IS 4 CALCULATE COSINE SIMILARITY AND RECOMMENDATIONS BASED ON
+              val dataFromResults = ss.createDataFrame(actualSmallerDataset).toDF("userId","movieId","rating")
+              val cosSim = cosineSimilarity(dataFromResults)
+              val topRatedMovies = calculateMovieBasedOnSimilarity(cosSim,actualSmallerDataset)
+              print("\nInsert 1 to add these prediction to your database: ")
+              var yesOrNo = scala.io.StdIn.readInt()
+              if(yesOrNo == 1){
+                actualDataset = updateModel(actualDataset,topRatedMovies)
+              }
             }else {
               print("Error: check range\n")
               print("Selection: ")
