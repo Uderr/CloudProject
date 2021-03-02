@@ -27,7 +27,7 @@ object ContentBasedReccomendation {
     val movies = ss.read.format("csv").option("header","true").load("/Users/giuseppedimaria/IntelliJ IDEA/CloudProject/Dataset3/movies.csv")
 
     def contentBasedRecommendations(rdf: DataFrame, mdf: DataFrame): Unit = {
-      //per il filtraggio basato sul contenuto, vengono predsi in considerazione solo 5 rating più recenti con punteggio di 3 o più
+      //per il filtraggio basato sul contenuto, vengono predsi in considerazione solo 5 rating con punteggio di 3 o più
       val ratingConsidered = selectMostMovieRated(mdf, rdf)
 
       //la matrice delle informazioni sul genere G, è una matrice mxk con m film e k generi.
