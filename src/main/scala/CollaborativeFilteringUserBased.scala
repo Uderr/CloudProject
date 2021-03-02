@@ -11,7 +11,7 @@ import scala.util.{Random, Try}
 
 
 
-object CollaborativeFilteringUserBasedALS {
+object CollaborativeFilteringUserBased {
 
   //SET OF SPARK ENVIRONMENT
   val conf = new SparkConf().setAppName("CollFilt").setMaster("local[*]")
