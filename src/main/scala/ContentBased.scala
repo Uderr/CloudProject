@@ -114,9 +114,9 @@ object ContentBasedReccomendation {
       //row: userId, List((movieId, rating), ....)
       .map(row => (
         row._1,
-        //seleziono la riga del genere corrispondente al film votato e moltiplico ogni valore con il rating corrispondente
+        //Dalla matrice dei generi viene selezionata la riga corrispondente al film votato e si moltiplica ogni valore con il rating corrispondente.
         row._2.map(singleRating => genreMatrix(singleRating._1).map(_ * singleRating._2))))
-      //somma per ogni utente tutti gli array di predispesizione per genere ottenuti
+      //somma per ogni utente tutti gli array di predispesizione del genere ottenuti
       .map(userInformation => ( userInformation._1,   userInformation._2.reduce((array1,array2) => array1.zip(array2).map { case (x, y) => x + y })))
   }
 
