@@ -89,7 +89,7 @@ object ContentBasedReccomendation {
       .select("movieId", "genres")
       .rdd
       //rimuovo i film che non hanno informazioni sul genere (0: movieId - 1: genres)
-      .filter(row => row.getString(1) != "(no genres listed)")
+      .filter(row => row.getString(1) != "(Nessun genere elencato)")
       .map(row => {
         val filmId = row.getString(0).toInt
         val currentMovieGenresArray = row.getString(1).split('|')
