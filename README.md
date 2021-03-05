@@ -45,11 +45,14 @@ libraryDependencies += "org.apache.spark" %% "spark-sql" % "3.0.1"
 
 
 
-## Running the tests
+## Execution
 
 
+### S3
 
-### And coding style tests
+### EMR
+
+
 
 ```
 
