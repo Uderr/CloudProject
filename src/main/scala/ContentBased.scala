@@ -23,8 +23,8 @@ object ContentBasedReccomendation {
     ss.sparkContext.setLogLevel("WARN")
 
     //DECLARATION OF DATASETS
-    val ratings = ss.read.format("csv").option("header","true").load("/Users/giuseppedimaria/IntelliJ IDEA/CloudProject/Dataset3/ratings.csv")
-    val movies = ss.read.format("csv").option("header","true").load("/Users/giuseppedimaria/IntelliJ IDEA/CloudProject/Dataset3/movies.csv")
+    val ratings = ss.read.format("csv").option("header","true").load("DatasetWithID/rating.csv")
+    val movies = ss.read.format("csv").option("header","true").load("DatasetWithID/movie.csv")
 
     def contentBasedRecommendations(rdf: DataFrame, mdf: DataFrame): Unit = {
       //per il filtraggio basato sul contenuto, vengono predsi in considerazione solo 5 rating con punteggio di 3 o più
