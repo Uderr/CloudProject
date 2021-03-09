@@ -46,29 +46,31 @@ libraryDependencies += "org.apache.spark" %% "spark-sql" % "3.0.1"
 
 ## Execution
 
-The execution of this application have been tested in local with the _spark-submit_ command and on a remote cluster with AWS.
-The services used to run this project on a remote cluster are:
+JAR files are required to run the application, once generated these can be run both locally and on the remote cluster.
+Services provided by AWS were used in order to run the application remotely.
+The services of AWS used to run this project on a remote cluster are:
 
 ### S3
 
-Used to store the files used to run the application properly.
+Used to create a bucket into which the files used in the execution of the JAR file have been loaded (the databases and the JARs themselves)
 
 ### EMR
 
-Used to generate the cluster where the application run.
+Used for processing large amounts of data on a remote cluster. By accessing this service you can generate your own cluster by selecting its name, version (in this case emr-6.2.0 as it is compatible with Spark 3.0.1), instance and pair of encryption keys generated with EC2 in order to communicate with the cluster remotely. 
+The access to the cluster takes place via an SSH connection which in a Windows environment requires the _Putty_ application.
+After the SSH connection, in order to execute the JAR files is used the command:
+
+```
+spark-submit --class "classname" "file.jar
+
+```
 
 ### EC2
 
-Used to generate a couple of key to make private the SSH connection.
+Used for generating the key pair used for communication with the cluster.
+In a Windows environment, the service requires the use of _PuttyGen_.
 
-### Execution on cluster
 
-The execution on cluster start with the command:
-
-```
-spark-submit --class "classname" "file.jar"
-
-```
 
 ## Authors
 
