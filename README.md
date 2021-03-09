@@ -61,7 +61,7 @@ The access to the cluster takes place via an SSH connection which in a Windows e
 After the SSH connection, in order to execute the JAR files is used the command:
 
 ```
-spark-submit --class "classname" "file.jar
+spark-submit --class "classname" "file.jar"
 
 ```
 
