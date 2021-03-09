@@ -22,24 +22,15 @@ object CollaborativeFilteringUserBased {
   def main(args: Array[String]): Unit = {
 
     //SET OF SPARK ENVIRONMENT
-    val conf = new SparkConf().setAppName("CollFilt").setMaster("local[*]")
-    val sc = new SparkContext(conf)
-    val sqlContext = new org.apache.spark.sql.SQLContext(sc)
-    val ss = SparkSession
-      .builder()
-      .master("local[*]")
-      .appName("Spark SQL basic example")
-      .config("spark.some.config.option", "some-value")
-      .getOrCreate()
+
+    val ss = SparkSession.builder().appName("CollFil").master("local[1]").getOrCreate()
 
     //REMOVE LOGS FROM TERMINAL
     ss.sparkContext.setLogLevel("WARN")
 
     //DECLARATION OF DATASETS
-    val data = sc.textFile("Dataset/rating.csv")
-    val movies = sc.textFile("Dataset/movie.csv")
-
-    val smallerData = sc.textFile("Dataset/test.csv")
+    val data = ss.sparkContext.textFile("Dataset/rating.csv")
+    val movies = ss.sparkContext.textFile("Dataset/movie.csv")
 
     val moviesForRandom = ss.read.format("csv").option("header","true").load("DatasetWithID/movie.csv")
 
@@ -137,7 +128,7 @@ object CollaborativeFilteringUserBased {
       println("------------------------ TOP RATED PREFERENCES ------------------------ ")
 
       val firstDataframe = data.groupBy("movieId").agg(sum("rating"))
-        .withColumn("sum(rating)", $"sum(rating)" / 40144)
+        .withColumn("sum(rating)", $"sum(rating)" / 100836)
       val dataframeMovieRating = movie.join(firstDataframe,movie("movieId") === firstDataframe("movieId"),"inner").drop(firstDataframe("movieId"))
         .sort(desc("sum(rating)"))
 
@@ -236,9 +227,10 @@ object CollaborativeFilteringUserBased {
       val userId = Array(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
 
 
-      val resultOfRating = sc.parallelize(ratingArr)
-      val movieIdentification = sc.parallelize(movieIDArray)
-      val userID = sc.parallelize(userId)
+      val resultOfRating = ss.sparkContext.parallelize(ratingArr)
+      val movieIdentification = ss.sparkContext.parallelize(movieIDArray)
+      val userID = ss.sparkContext.parallelize(userId)
+
 
 
       val dataframeResultOfRating = resultOfRating.map(rate => rate).toDF("rating")
@@ -327,7 +319,8 @@ object CollaborativeFilteringUserBased {
 
 
       val movies = ss.read.format("csv").option("header","true").load("DatasetWithID/movie.csv")
-      val movie = movies.withColumn("movieId", col("movieId").cast("Integer"))
+      val mov = movies.drop("genres")
+      val movie = mov.withColumn("movieId", col("movieId").cast("Integer"))
 
       val onlySelectedMovies = oldDat.where("userId == 0")
       val renamedOnlySelectedMovies = onlySelectedMovies.toDF("userId","movieId","rating")
@@ -357,7 +350,7 @@ object CollaborativeFilteringUserBased {
       val test3 = tes2.withColumn("rating",col("sum(ratePred)") / col("sum(cosSim)"))
         .drop("cosSim","userId","ratePred","sum(ratePred)","sum(cosSim)").withColumn("userId",lit(0))
         .distinct()
-        .orderBy("rating")
+        .orderBy(desc("rating"))
         .limit(20)
 
       val finalDataRDDRating = test3.select("userId", "movieId", "rating").rdd.map(r => Rating(r.getInt(0), r.getInt(1),r.getDouble(2)))
@@ -391,7 +384,6 @@ object CollaborativeFilteringUserBased {
     //CREATION OF TUPLES
     val results = data.map(ratingCreation)
     val titles = movies.map(line => line.split(",").take(2)).map(array => (array(0).toInt,array(1))).collectAsMap()
-    val smallResults = smallerData.map(ratingCreation)
 
 
     //----------------------------------------------------------------------------
@@ -413,7 +405,6 @@ object CollaborativeFilteringUserBased {
 
     //VARIABLES USED TO REMEMBER USER PREFERENCES
     var actualDataset = results
-    var actualSmallerDataset = smallResults
 
     print("What you want to do?\n")
     print("- Press 0 to shut down the programm\n")
@@ -437,7 +428,6 @@ object CollaborativeFilteringUserBased {
               val newDatasetTopRated = askUserInput(topRatedFilms, results)
               actualDataset = updateModel(actualDataset, newDatasetTopRated)
               actualAlsAlgorithm = ALSAlgo(actualDataset)
-              actualSmallerDataset = updateModel(actualSmallerDataset, newDatasetTopRated)
               signal = 1
             }else {
               print("Error: check range\n"); print("Selection: ")
@@ -469,9 +459,9 @@ object CollaborativeFilteringUserBased {
               print(" \n ");
               print(" \n ")
             }else if(rate == 4){ //IF INPUT IS 4 CALCULATE COSINE SIMILARITY AND RECOMMENDATIONS BASED ON
-              val dataFromResults = ss.createDataFrame(actualSmallerDataset).toDF("userId","movieId","rating")
+              val dataFromResults = ss.createDataFrame(actualDataset).toDF("userId","movieId","rating")
               val cosSim = cosineSimilarity(dataFromResults)
-              val topRatedMovies = calculateMovieBasedOnSimilarity(cosSim,actualSmallerDataset)
+              val topRatedMovies = calculateMovieBasedOnSimilarity(cosSim,actualDataset)
               print("\nInsert 1 to add these prediction to your database: ")
               var yesOrNo = scala.io.StdIn.readInt()
               if(yesOrNo == 1){

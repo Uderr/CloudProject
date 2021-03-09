@@ -6,52 +6,97 @@ import org.apache.spark.sql.{DataFrame, SparkSession}
 
 object ContentBasedReccomendation {
 
+
+  //SET OF SPARK ENVIRONMENT
+  val conf = new SparkConf().setAppName("Cont-Based").setMaster("local[*]")
+  val sc = new SparkContext(conf)
+  val sqlContext = new org.apache.spark.sql.SQLContext(sc)
+  val ss = SparkSession
+    .builder()
+    .master("local[*]")
+    .appName("Spark SQL basic example")
+    .config("spark.some.config.option", "some-value")
+    .getOrCreate()
+
+  //REMOVE LOGS FROM TERMINAL
+  ss.sparkContext.setLogLevel("WARN")
+
+  //DECLARATION OF DATASETS
+  val ratings = ss.read.format("csv").option("header","true").load("DatasetWithID/rating.csv")
+  val movies = ss.read.format("csv").option("header","true").load("DatasetWithID/movie.csv")
+
   def main(args: Array[String]): Unit = {
 
-    //SET OF SPARK ENVIRONMENT
-    val conf = new SparkConf().setAppName("Cont-Based").setMaster("local[*]")
-    val sc = new SparkContext(conf)
-    val sqlContext = new org.apache.spark.sql.SQLContext(sc)
-    val ss = SparkSession
-      .builder()
-      .master("local[*]")
-      .appName("Spark SQL basic example")
-      .config("spark.some.config.option", "some-value")
-      .getOrCreate()
+    val userNumber = 5  //numero di utenti
+    val recommendationsNumber = 20  //numero di raccomandazioni di film per gli utenti
+    var results = "---\n\n"
+    var t0: Long = 0
+    var t1: Long = 0
+    t0 = System.nanoTime() //tempo iniziale
+    results = printReccomendation("Raccomandazioni Basate sul Contenuto", contentBasedRecommendations(ratings, movies), recommendationsNumber, userNumber)
+    t1 = System.nanoTime() //tempo finale
 
-    //REMOVE LOGS FROM TERMINAL
-    ss.sparkContext.setLogLevel("WARN")
+    //calcolo il tempo impiegato per l'elaborazione
+    //tempo finale meno il tempo iniziale (prima e dopo l'esecuzione)
+    results += "tempo impiegato: " + ((t1-t0)/Math.pow(10,9)) + "s\n\n"
 
-    //DECLARATION OF DATASETS
-    val ratings = ss.read.format("csv").option("header","true").load("DatasetWithID/rating.csv")
-    val movies = ss.read.format("csv").option("header","true").load("DatasetWithID/movie.csv")
+    println(results)
 
-    def contentBasedRecommendations(rdf: DataFrame, mdf: DataFrame): Unit = {
-      //per il filtraggio basato sul contenuto, vengono predsi in considerazione solo 5 rating con punteggio di 3 o più
-      val ratingConsidered = selectMostMovieRated(mdf, rdf)
+  }
 
-      //la matrice delle informazioni sul genere G, è una matrice mxk con m film e k generi.
-      // 1 se il film appartiene al genere, 0 altrimenti
-      val movieGenresMatrix = buildMoviesGenresMatrix(mdf)
-
-      //il risultato del prodotto scalare tra la matrice di rating e la matrice di genere,
-      //è una matrice n×k detta P, che contiene la predisposizione di ciascun utente verso ciascun genere
-      val predispositionUserGenre = calculatePredispositionUserGenre(ratingConsidered, movieGenresMatrix)
-
-      //calcolo dei film già visti per ogni utente
-      val userAlreadySeenMovies = calculateAlreadySeenMovies(rdf)
-      val reccomendationWithMovieId = calculateContendBasedRecommendation(predispositionUserGenre, movieGenresMatrix, userAlreadySeenMovies)
-      val recommendationWithMovieTitle = findMovieTitleForRecommendation(mdf, reccomendationWithMovieId)
-
+  //gestisco la stampa finale delle raccomandazioni per gli utenti
+  def printReccomendation(recommenderSystemType: String, recommendationArray: RDD[(Int, Seq[(String, Float)])], recommendationsNumber: Int, numberUsers: Int): String = {
+    var strToPrint = recommenderSystemType + "\n"
+    //ordino l'array delle raccomandazioni per il numero di utenti (crescente da 1 a 5)
+    val arr = recommendationArray.takeOrdered(numberUsers)(Ordering[Int].on(x => x._1)) //x._1: colonna utente. Restituisce array ordinato
+      .map(tuple => (tuple._1, tuple._2.sortWith(_._2 > _._2).take(recommendationsNumber)))
+    //due cicli for: il primo per gli utenti; il secondo per le raccomandazioni
+    for (i <- arr.indices) {
+      strToPrint += "utente: " + arr(i)._1 + " -> "
+      for (j <- arr(i)._2.indices) {
+        //indice       //titolo                        //rating
+        strToPrint += "\t" + (j+1) + ")'" + arr(i)._2(j)._1 + "' score: " + arr(i)._2(j)._2 + "/5"
+        if (j < arr(i)._2.length-1)
+          strToPrint += ";"
+      }
+      strToPrint += "\n"
     }
-    contentBasedRecommendations(ratings, movies)
+    strToPrint+"\n"
+  }
+
+  def contentBasedRecommendations(rdf: DataFrame, mdf: DataFrame): RDD[(Int, Seq[(String, Float)])] = {
+    //per il filtraggio basato sul contenuto, vengono presi in considerazione solo 5 rating con punteggio di 3 o più
+    val ratingConsidered = selectMostMovieRated(mdf, rdf)
+
+    //la matrice delle informazioni sul genere G, è una matrice mxk con m film e k generi.
+    // 1 se il film appartiene al genere, 0 altrimenti
+    val movieGenresMatrix = buildMoviesGenresMatrix(mdf)
+
+    //il risultato del prodotto scalare tra la matrice di rating e la matrice di genere,
+    //è una matrice n×k detta P, che contiene la predisposizione di ciascun utente verso ciascun genere
+    val predispositionUserGenre = calculatePredispositionUserGenre(ratingConsidered, movieGenresMatrix)
+
+    //calcolo dei film già visti per ogni utente
+    val userAlreadySeenMovies = calculateAlreadySeenMovies(rdf)
+    val reccomendationWithMovieId = calculateContendBasedRecommendation(predispositionUserGenre, movieGenresMatrix, userAlreadySeenMovies)
+    val recommendationWithMovieTitle = findMovieTitleForRecommendation(mdf, reccomendationWithMovieId)
+
+    //print(selectMostMovieRated(movies, ratings).getClass) //class org.apache.spark.rdd.MapPartitionsRDD
+    //print(buildMoviesGenresMatrix(movies).getClass) //class scala.collection.immutable.Map$WithDefault
+    //print(calculatePredispositionUserGenre(ratingConsidered, movieGenresMatrix).getClass) //class org.apache.spark.rdd.MapPartitionsRDD
+    //print(calculateAlreadySeenMovies(ratings).getClass) //class scala.collection.immutable.Map$WithDefault
+    //recommendationWithMovieTitle.foreach(println)
+
+    recommendationWithMovieTitle
   }
 
   def selectMostMovieRated(movieDf: DataFrame, ratingDf: DataFrame, numberMostRatedCons: Int = 5) : RDD[(Int, Seq[(Int, Float)])] = {
     val idMovieWithoutGenres =
       movieDf
+        //0: movieId, 1: genres
         .select("movieId", "genres")
         .rdd.filter(r => r.getString(1) == "(Nessun genere elencato)")
+        //movieId convertiti in Int
         .map(_.getString(0).toInt)
         .collect()
 
@@ -89,7 +134,7 @@ object ContentBasedReccomendation {
       .select("movieId", "genres")
       .rdd
       //rimuovo i film che non hanno informazioni sul genere (0: movieId - 1: genres)
-      .filter(row => row.getString(1) != "(Nessun genere elencato)")
+      .filter(row => row.getString(1) != "(no genres listed)")
       .map(row => {
         val filmId = row.getString(0).toInt
         val currentMovieGenresArray = row.getString(1).split('|')
@@ -117,7 +162,7 @@ object ContentBasedReccomendation {
         //Dalla matrice dei generi viene selezionata la riga corrispondente al film votato e si moltiplica ogni valore con il rating corrispondente.
         row._2.map(singleRating => genreMatrix(singleRating._1).map(_ * singleRating._2))))
       //somma per ogni utente tutti gli array di predispesizione del genere ottenuti
-      .map(userInformation => ( userInformation._1,   userInformation._2.reduce((array1,array2) => array1.zip(array2).map { case (x, y) => x + y })))
+      .map(userInformation => ( userInformation._1, userInformation._2.reduce((array1,array2) => array1.zip(array2).map { case (x, y) => x + y })))
   }
 
   //calcola i film già visti per ogni utente
@@ -184,4 +229,7 @@ object ContentBasedReccomendation {
     recommendationWithMovieId.map(row => (row._1, row._2.map(movieRecommendation => (moviesMap(movieRecommendation._1), movieRecommendation._2))))
   }
 
+
 }
+
+
