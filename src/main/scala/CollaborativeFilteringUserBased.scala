@@ -23,16 +23,16 @@ object CollaborativeFilteringUserBased {
 
     //SET OF SPARK ENVIRONMENT
 
-    val ss = SparkSession.builder().appName("CollFil").master("local[1]").getOrCreate()
+    val ss = SparkSession.builder().appName("CollFil").getOrCreate()
 
     //REMOVE LOGS FROM TERMINAL
     ss.sparkContext.setLogLevel("WARN")
 
     //DECLARATION OF DATASETS
-    val data = ss.sparkContext.textFile("Dataset/rating.csv")
-    val movies = ss.sparkContext.textFile("Dataset/movie.csv")
+    val data = ss.sparkContext.textFile("s3://cloudprogramming/Dataset/rating.csv")
+    val movies = ss.sparkContext.textFile("s3://cloudprogramming/Dataset/movie.csv")
 
-    val moviesForRandom = ss.read.format("csv").option("header","true").load("DatasetWithID/movie.csv")
+    val moviesForRandom = ss.read.format("csv").option("header","true").load("s3://cloudprogramming/DatasetWithID/movie.csv")
 
 
 
@@ -121,8 +121,8 @@ object CollaborativeFilteringUserBased {
     def topRated(): (Array[String], Array[Int]) = {
       import ss.implicits._
 
-      val data = ss.read.format("csv").option("header", "true").load("DatasetWithID/rating.csv")
-      val movies = ss.read.format("csv").option("header","true").load("DatasetWithID/movie.csv")
+      val data = ss.read.format("csv").option("header", "true").load("s3://cloudprogramming/DatasetWithID/rating.csv")
+      val movies = ss.read.format("csv").option("header","true").load("s3://cloudprogramming/DatasetWithID/movie.csv")
       val movie = movies.withColumn("movieId", $"movieId".cast("Integer"))
 
       println("------------------------ TOP RATED PREFERENCES ------------------------ ")
@@ -152,8 +152,8 @@ object CollaborativeFilteringUserBased {
       val oldDat = oldDataset.toDF()
       //test.show(80)
 
-      val data = ss.read.format("csv").option("header", "true").load("DatasetWithID/rating.csv")
-      val movies = ss.read.format("csv").option("header","true").load("DatasetWithID/movie.csv")
+      val data = ss.read.format("csv").option("header", "true").load("s3://cloudprogramming/DatasetWithID/rating.csv")
+      val movies = ss.read.format("csv").option("header","true").load("s3://cloudprogramming/DatasetWithID/movie.csv")
       val movie = movies.withColumn("movieId", $"movieId".cast("Integer"))
 
       println("------------------------ RANDOM PREFERENCES ------------------------ ")
@@ -315,10 +315,10 @@ object CollaborativeFilteringUserBased {
       import ss.implicits._
 
       val oldDat = oldData.toDF("userId","movieId","rating")
-      //cosSim.show()
+      cosSim.show()
 
 
-      val movies = ss.read.format("csv").option("header","true").load("DatasetWithID/movie.csv")
+      val movies = ss.read.format("csv").option("header","true").load("s3://cloudprogramming/DatasetWithID/movie.csv")
       val mov = movies.drop("genres")
       val movie = mov.withColumn("movieId", col("movieId").cast("Integer"))
 
@@ -339,13 +339,13 @@ object CollaborativeFilteringUserBased {
         .toDF("userId","cosSim","rating","movieId","title")
         .withColumn("ratePred", col("rating")*col("cosSim"))
         .orderBy(desc("cosSim"),desc("rating"))
-      //completeTable.show()
+      completeTable.show()
 
       val test = completeTable.join(completeTable.groupBy("movieId").sum("ratePred"), Seq("movieId"))
-      //test.show()
+      test.show()
 
       val tes2 = test.join(test.groupBy("movieId").sum("cosSim"), Seq("movieId"))
-      //tes2.show()
+      tes2.show()
 
       val test3 = tes2.withColumn("rating",col("sum(ratePred)") / col("sum(cosSim)"))
         .drop("cosSim","userId","ratePred","sum(ratePred)","sum(cosSim)").withColumn("userId",lit(0))
@@ -397,7 +397,7 @@ object CollaborativeFilteringUserBased {
     //predictionsWithMapping.foreach(println)
 
     val mSError = MSE(actualAlsAlgorithm,predictionsWithMapping)
-    println("(ALS) The mean square error of this model is: " + mSError)
+    println("\n\n(ALS) The mean square error of this model is: " + mSError + "\n\n")
 
 
     //----------------------------------------------------------------------------
@@ -462,7 +462,7 @@ object CollaborativeFilteringUserBased {
               val dataFromResults = ss.createDataFrame(actualDataset).toDF("userId","movieId","rating")
               val cosSim = cosineSimilarity(dataFromResults)
               val topRatedMovies = calculateMovieBasedOnSimilarity(cosSim,actualDataset)
-              print("\nInsert 1 to add these prediction to your database: ")
+              print("\nInsert 1 to add these prediction to your database, 0 otherwise: ")
               var yesOrNo = scala.io.StdIn.readInt()
               if(yesOrNo == 1){
                 actualDataset = updateModel(actualDataset,topRatedMovies)

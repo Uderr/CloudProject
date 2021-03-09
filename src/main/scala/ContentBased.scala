@@ -4,7 +4,7 @@ import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql.{DataFrame, SparkSession}
 
 
-object ContentBasedReccomendation {
+object ContentBased {
 
 
   //SET OF SPARK ENVIRONMENT
@@ -22,8 +22,8 @@ object ContentBasedReccomendation {
   ss.sparkContext.setLogLevel("WARN")
 
   //DECLARATION OF DATASETS
-  val ratings = ss.read.format("csv").option("header","true").load("DatasetWithID/rating.csv")
-  val movies = ss.read.format("csv").option("header","true").load("DatasetWithID/movie.csv")
+  val ratings = ss.read.format("csv").option("header","true").load("s3://cloudprogramming/DatasetWithID/rating.csv")
+  val movies = ss.read.format("csv").option("header","true").load("s3://cloudprogramming/DatasetWithID/movie.csv")
 
   def main(args: Array[String]): Unit = {
 
