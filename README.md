@@ -16,8 +16,7 @@ The datasets used in the project come from MovieLens and they can be downloaded 
 The Collaborative Filtering is implemented in two ways: in the first way is used the ALS algorithm to factorizate the matrix of the ratings in order to obtain a predictions for a certain user, in the second instead is used the Cosine Similarity, this is used to calculate the similarity of a new user with all the other users in the dataset, after it select 15 movies rated with highest rate by users most similar to the new user.
 In order to face the Cold Start problem are implemented in this project three function (CollaborativeFilteringUserBased.scala), that are used to gain informations about a new user asking him to rate some movies (20 top rated movies and if the user want 20 random movies), these rates are saved in a new dataset that can be used during the session.
 
-The Content Based 
-
+The Content Based is implemented in an unique way, and it search similarity on attributes of items foreach user. At the end of the execution it returns 20 movies recommendations for 5 different user.
 
 ## Environment
 
@@ -47,15 +46,27 @@ libraryDependencies += "org.apache.spark" %% "spark-sql" % "3.0.1"
 
 ## Execution
 
+The execution of this application have been tested in local with the _spark-submit_ command and on a remote cluster with AWS.
+The services used to run this project on a remote cluster are:
 
 ### S3
 
+Used to store the files used to run the application properly.
+
 ### EMR
 
+Used to generate the cluster where the application run.
 
+### EC2
+
+Used to generate a couple of key to make private the SSH connection.
+
+### Execution on cluster
+
+The execution on cluster start with the command:
 
 ```
-
+spark-submit --class "classname" "file.jar"
 
 ```
 
