@@ -23,7 +23,7 @@ object CollaborativeFilteringUserBased {
 
     //SET OF SPARK ENVIRONMENT
 
-    val ss = SparkSession.builder().appName("CollFil").master("local[*]").getOrCreate()
+    val ss = SparkSession.builder().appName("CollFil").getOrCreate()
 
     //REMOVE LOGS FROM TERMINAL
     ss.sparkContext.setLogLevel("WARN")
