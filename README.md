@@ -10,11 +10,13 @@ There are three approaches of recommendation systems: collaborative filtering, c
 
 ## Description
 
-In order to work, the algorithms need two dataset, the dataset of movie, which contain informations about movies, and the dataset of ratings of users for a certain movie. 
+In order to work, the algorithms need two datasets, the dataset of movie, which contains informations about movies, and the dataset of ratings of users for a certain movie. 
 The datasets used in the project come from MovieLens and they can be downloaded freely from [here](https://grouplens.org/datasets/movielens/).
 
-The Collaborative Filtering is implemented in two ways: in the first way is used the ALS algorithm to factorizate the matrix of the ratings in order to obtain a predictions for a certain user, in the second instead is used the Cosine Similarity, this is used to calculate the similarity of a new user with all the other users in the dataset, after it select 15 movies rated with highest rate by users most similar to the new user.
-In order to face the Cold Start problem are implemented in this project three function (CollaborativeFilteringUserBased.scala), that are used to gain informations about a new user asking him to rate some movies (20 top rated movies and if the user want 20 random movies), these rates are saved in a new dataset that can be used during the session.
+The Collaborative Filtering is implemented in two ways: in the first way is used the ALS algorithm in order to obtain a predictions for a certain user, in the second instead is used the Cosine Similarity, this is used to calculate the similarity of a new user with all the other users in the dataset.
+
+In order to face the Cold Start problem are implemented in this project three function (CollaborativeFilteringUserBased.scala), that are used to gain informations about a new user asking him to rate some movies (20 top rated movies and if the user want 20 random movies).
+These rates are saved in a new dataset that can be used during the session.
 
 The Content Based is implemented in an unique way, and it search similarity on attributes of items foreach user. At the end of the execution it returns 20 movies recommendations for 5 different user.
 
@@ -48,11 +50,11 @@ libraryDependencies += "org.apache.spark" %% "spark-sql" % "3.0.1"
 
 JAR files are required to run the application, once generated these can be run both locally and on the remote cluster.
 Services provided by AWS were used in order to run the application remotely.
-The services of AWS used to run this project on a remote cluster are:
+The services of AWS used to run this project are:
 
 ### S3
 
-Used to create a bucket into which the files used in the execution of the JAR file have been loaded (the databases and the JARs themselves)
+Used to create a bucket into which the files involved in the execution of the JAR file have been loaded (the databases and the JARs themselves)
 
 ### EMR
 
@@ -67,7 +69,7 @@ spark-submit --class "classname" "file.jar"
 
 ### EC2
 
-Used for generating the key pair used for communication with the cluster.
+Used for generate the key pair used for communication with the cluster.
 In a Windows environment, the service requires the use of _PuttyGen_.
 
 
