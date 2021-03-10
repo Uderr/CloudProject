@@ -23,7 +23,7 @@ object CollaborativeFilteringUserBased {
 
     //SET OF SPARK ENVIRONMENT
 
-    val ss = SparkSession.builder().appName("CollFil").getOrCreate()
+    val ss = SparkSession.builder().appName("CollFil").master("local[*]").getOrCreate()
 
     //REMOVE LOGS FROM TERMINAL
     ss.sparkContext.setLogLevel("WARN")
@@ -64,15 +64,6 @@ object CollaborativeFilteringUserBased {
       val ratesAndPreds = ratings.map { case Rating(user, product, rate) => ((user, product), rate)
       }.join(predictions)
       ratesAndPreds
-    }
-
-    //DEFINITION OF A FUNCTION THAT, RECEIVING IN INPUT AND RDD AND A MODEL RETURN THE PREDICTIONS FOR A USER,ITEM KEY-VALUE
-    def predictionWithoutMapping(ratings: RDD[Rating], algoALS: MatrixFactorizationModel): RDD[((Int,Int),Double)]= {
-      val usersProducts = ratings.map { case Rating(user, product, rate) => (user, product)
-      }
-      val predictions = algoALS.predict(usersProducts).map { case Rating(user, product, rate) => ((user, product), rate)
-      }
-      predictions
     }
 
 
@@ -347,18 +338,20 @@ object CollaborativeFilteringUserBased {
       val tes2 = test.join(test.groupBy("movieId").sum("cosSim"), Seq("movieId"))
       tes2.show()
 
-      val test3 = tes2.withColumn("rating",col("sum(ratePred)") / col("sum(cosSim)"))
-        .drop("cosSim","userId","ratePred","sum(ratePred)","sum(cosSim)").withColumn("userId",lit(0))
+      val test3 = tes2.withColumn("ratingPredicted",col("sum(ratePred)") / col("sum(cosSim)"))
+        .drop("userId","ratePred","sum(ratePred)","sum(cosSim)").withColumn("userId",lit(0))
         .distinct()
-        .orderBy(desc("rating"))
+        .orderBy(desc("cosSim"),desc("ratingPredicted"))
         .limit(20)
 
-      val finalDataRDDRating = test3.select("userId", "movieId", "rating").rdd.map(r => Rating(r.getInt(0), r.getInt(1),r.getDouble(2)))
+      test3.show()
+
+      val finalDataRDDRating = test3.select("userId", "movieId", "ratingPredicted").rdd.map(r => Rating(r.getInt(0), r.getInt(1),r.getDouble(2)))
 
 
       val nameOfFilm = test3.select("title").collect().map(_.getString(0))
 
-      val rateOfFilm = test3.select("rating").collect.map(_.getDouble(0))
+      val rateOfFilm = test3.select("ratingPredicted").collect.map(_.getDouble(0))
 
       val counter = nameOfFilm.length
       print("\n \n According to the cosine similarity you may like the films: \n")
